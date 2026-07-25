@@ -4,13 +4,13 @@
 
 ## 1. 开始工作的强制步骤
 
-本项目是 `/Users/kane/Projects` 下的独立 Git 仓库。开始任何分析、安装或修改之前：
+本项目是一个可克隆到任意设备和目录的独立 Git 仓库。本文中的“仓库根目录”指 `git rev-parse --show-toplevel` 返回的位置，不依赖任何固定绝对路径。开始任何分析、安装或修改之前：
 
-1. 阅读父目录 `/Users/kane/Projects/AGENTS.md`，继承设备环境、默认技术架构和通用规则。
-2. 阅读本文件，项目规则优先于父目录中的一般默认值。
+1. 阅读本文件；它包含继续开发所需的完整项目规则。
+2. 如果当前设备另外提供容器级或用户级 `AGENTS.md`，同时遵循其中不与本项目冲突的通用规范；项目不能假设该文件存在或位于固定路径。
 3. 检查 `git status --short --branch`、最近提交和实际目录。
 4. 阅读与任务相关的 `docs/product/`、`docs/decisions/`、`docs/runbooks/`。
-5. 按父目录文档执行环境预检，再决定是否安装项目依赖。
+5. 按本文件的环境规则检查设备工具和项目依赖。
 
 不得仅根据项目名推断功能，不得把“计划采用”误报为“已经实现”。
 
@@ -35,7 +35,7 @@ GitHub 仓库：<https://github.com/399/WealthPlans>（公开）
 
 ## 3. 当前项目状态
 
-状态：结构初始化完成，功能开发尚未开始。
+状态：技术基线与首个响应式页面已完成，本地全栈运行已验证。
 
 截至 2026-07-25 已完成：
 
@@ -48,15 +48,19 @@ GitHub 仓库：<https://github.com/399/WealthPlans>（公开）
 - 创建 `.node-version`，使本项目选择 Node 24。
 - 根据已连接的 GitHub 账户配置 Git 身份并建立首次本地提交。
 - 创建公开 GitHub 仓库 `399/WealthPlans`，本地 `main` 跟踪 `origin/main`。
+- 移除项目文档中的设备绝对路径依赖，仓库可克隆到任意目录。
+- 创建并锁定 React、Vite、Tailwind、Hono、Zod、Drizzle、Wrangler、Biome、Vitest 和 Playwright 项目依赖。
+- 建立 Cloudflare Vite 插件、Hono Worker、Hono RPC 和 `/api/v1/health`。
+- 建立 local、preview、production 三层 Cloudflare 环境隔离方案与操作手册。
+- 验证 local D1 和 local R2 bindings；日常开发不访问远程资源。
+- 完成响应式 WealthPlans 初始页面，演示数据已明确标记。
+- 类型检查、Biome、单元测试、生产构建和 Wrangler dry-run 已通过。
 
 尚未完成，且当前不应被视为缺陷：
 
-- 未创建 `package.json` 和锁文件。
-- 未安装任何项目依赖。
-- 未生成 React、Vite 或 Hono 示例代码。
-- 未创建 D1、R2、Worker 或 Cloudflare 环境。
+- 未创建远程 preview/production D1、R2 或 Worker。
 - 未配置域名、认证、CI/CD 和线上部署。
-- 未定义页面、数据表、API、业务规则和验收标准。
+- 未定义真实业务数据表、账户体系和完整产品范围。
 - `.agents/skills/` 当前没有实际 skill。
 
 后续 Agent 完成一个明确里程碑时，必须更新本节：只记录经过验证的事实，并将被取代的信息移除或标记为历史。
@@ -87,6 +91,10 @@ PC 和移动网页共用一套 React 应用，采用 Mobile First 响应式设�
 ```text
 WealthPlans/
 ├── AGENTS.md                    # 本文件：项目入口与当前事实
+├── package.json                 # 项目依赖与标准命令
+├── pnpm-lock.yaml               # 可复现依赖锁
+├── wrangler.jsonc               # Worker 与 Cloudflare bindings
+├── vite.config.ts               # React + Cloudflare 本地运行
 ├── .agents/
 │   └── skills/                 # WealthPlans 专属的可复用 Agent 技能
 ├── docs/
@@ -110,6 +118,7 @@ WealthPlans/
 │   │   └── services/           # 跨路由业务服务
 │   └── shared/
 │       ├── constants/
+│       ├── lib/
 │       ├── schemas/            # 前后端共享 Zod schema
 │       └── types/
 └── tests/
@@ -144,7 +153,7 @@ WealthPlans/
 
 ## 7. 环境与依赖规则
 
-设备级环境遵循 `/Users/kane/Projects/AGENTS.md`。本项目已经用 `.node-version` 固定 Node 24。实际生成脚手架时还应：
+设备级环境由各设备独立准备，本项目不依赖固定安装目录。本项目已经用 `.node-version` 固定 Node 24。项目脚手架应：
 
 - 在 `package.json#engines` 声明兼容的 Node 版本。
 - 在 `package.json#packageManager` 固定实际 pnpm 版本。
@@ -152,11 +161,27 @@ WealthPlans/
 - 提交 `pnpm-lock.yaml`。
 - 提供 `.env.example` 或 `.dev.vars.example`，只列变量名和无敏感示例。
 
-在 `package.json` 尚不存在的当前阶段，不运行 `pnpm install`，也不为了填充目录而生成示例应用。
+边界规则：
+
+- Node.js、mise/nvm、Corepack、Git 和 GitHub CLI 是设备级工具，只安装一次，不放入仓库。
+- React、Hono、Wrangler、Vite、Tailwind、测试工具及所有应用依赖必须作为项目依赖写入 `package.json`，否则其他设备无法复现构建。
+- `node_modules/`、本地 Worker 状态、编辑器缓存和真实密钥不得提交。
+- 项目内的 UI 组件属于 WealthPlans 产品代码；跨项目通用 Agent 技能放在用户级 skills 目录，不复制进本仓库。
+
+当前标准命令：
+
+```sh
+pnpm install --frozen-lockfile  # 安装锁定的项目依赖
+pnpm cf:typegen                 # bindings 变化后重新生成 Worker 类型
+pnpm dev                        # local React + Worker + D1 + R2
+pnpm check                      # 类型、规范、测试、构建、部署 dry-run
+```
+
+Cloudflare 资源与环境切换详见 `docs/decisions/0001-cloudflare-environments.md` 和 `docs/runbooks/local-development.md`。
 
 ## 8. Cloudflare 与系统资源确认
 
-当前没有创建任何 Cloudflare 资源。
+当前没有创建任何远程 Cloudflare 资源。本地开发使用 Wrangler/Cloudflare Vite 插件提供的本地 D1、R2 模拟，不连接线上资源。
 
 资源建立后，以以下位置为唯一事实来源：
 
@@ -175,7 +200,8 @@ WealthPlans/
 规则：
 
 - 不把示例资源名或推测的 ID 写成真实资源。
-- preview 和 production 使用不同的 D1、R2 及密钥。
+- local、preview 和 production 使用相互隔离的 D1、R2 及密钥。
+- 日常 `pnpm dev` 只允许使用本地 binding；不得给 production binding 设置 `remote: true`。
 - 未经用户明确授权，不创建、修改或删除线上资源，不部署 production。
 - 任何资源创建完成后，立即把非敏感 binding 和环境信息写入 `wrangler.jsonc`，把操作方式写入 runbook。
 - 不在日志、提交、文档或对话中输出真实 Token、Cookie、密码和财务敏感数据。

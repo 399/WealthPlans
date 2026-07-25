@@ -1,0 +1,50 @@
+{
+  "name": "wealthplans",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A lightweight personal wealth planning web application.",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "packageManager": "pnpm@11.17.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "pnpm build && vite preview",
+    "typecheck": "tsc -b",
+    "lint": "biome check src tests vite.config.ts vitest.config.ts",
+    "format": "biome format --write src tests vite.config.ts vitest.config.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build && wrangler deploy --dry-run",
+    "cf:typegen": "wrangler types",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local --persist-to .wrangler/state"
+  },
+  "dependencies": {
+    "@hono/zod-validator": "^0.9.0",
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.12.32",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-router-dom": "^7.18.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.5",
+    "@cloudflare/vite-plugin": "^1.47.0",
+    "@playwright/test": "^1.61.1",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^26.1.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.4",
+    "@vitest/coverage-v8": "^4.1.10",
+    "drizzle-kit": "^0.31.10",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.5",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.114.0"
+  }
+}

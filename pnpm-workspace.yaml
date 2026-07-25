@@ -1,0 +1,4 @@
+# pnpm 11 stores the project build-script allowlist here. No workspace packages are declared.
+allowBuilds:
+  esbuild: true
+  workerd: true

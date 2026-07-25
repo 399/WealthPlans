@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.node.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.worker.tsbuildinfo",
+    "moduleDetection": "auto",
+    "types": ["vite/client", "./worker-configuration.d.ts"]
+  },
+  "include": ["worker-configuration.d.ts", "src/worker", "src/shared"]
+}
