@@ -1,0 +1,26 @@
+.DS_Store
+
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+.wrangler/
+
+# Local databases and generated test output
+*.sqlite
+*.sqlite3
+playwright-report/
+test-results/
+
+# Secrets and local environment
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+.env
+.env.*
+!.env.example
+
+# Logs and temporary files
+*.log
+*.tmp
+
