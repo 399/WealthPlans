@@ -20,6 +20,8 @@
 
 项目方向：个人财富规划与管理 Web 应用。
 
+GitHub 仓库：<https://github.com/399/WealthPlans>（公开）
+
 当前只确认项目方向，尚未确认具体产品范围、数据来源、账户体系、计算规则或发布地区。以下功能均不能在没有需求确认时自行假设：
 
 - 银行、券商或支付账户连接。
@@ -45,10 +47,10 @@
 - 设备已通过 mise 配置 Node.js 24 LTS，并通过 Corepack 配置 pnpm。
 - 创建 `.node-version`，使本项目选择 Node 24。
 - 根据已连接的 GitHub 账户配置 Git 身份并建立首次本地提交。
+- 创建公开 GitHub 仓库 `399/WealthPlans`，本地 `main` 跟踪 `origin/main`。
 
 尚未完成，且当前不应被视为缺陷：
 
-- 尚未创建或绑定 GitHub 远程仓库。
 - 未创建 `package.json` 和锁文件。
 - 未安装任何项目依赖。
 - 未生成 React、Vite 或 Hono 示例代码。
