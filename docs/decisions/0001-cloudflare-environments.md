@@ -1,6 +1,6 @@
 # ADR 0001：Cloudflare 本地、预览与生产环境隔离
 
-状态：已采纳
+状态：已恢复采用；2026-07-27 用户确认需要远程查看
 
 日期：2026-07-25
 
@@ -69,3 +69,23 @@ WealthPlans 将部署到 Cloudflare Workers，并计划使用 D1 保存结构化
 
 - 需要维护三个环境的资源配置。
 - local 模拟不能完全替代部署前的 preview 集成验证。
+
+## 2026-07-27 恢复决定
+
+本地 SQLite 阶段证明了数据模型与同步闭环，但不能满足跨设备远程查看。项目恢复 Worker + D1/R2：
+
+- D1 保存可查询的结构化金融数据。
+- R2 归档每次成功抓取的标准化批次。
+- preview 提供远程读取，写入默认关闭。
+- UI 使用 Tailwind CSS v4 与 shadcn/ui 组件。
+
+ADR 0002 保留为历史阶段记录，不再是当前运行基线。
+
+### Local 与 preview 的显式复制
+
+为满足用户主动同步两侧数据的需求，local 配置增加只指向 preview 的 `REMOTE_DB` 与
+`REMOTE_FILES` remote bindings。Worker 代码仍在本机运行，只有用户访问环境同步功能时才读取或写入
+preview。该例外不允许连接 production，也不允许后台自动复制。
+
+复制使用稳定主键、金融内容指纹和乐观计划校验；一次操作只允许一个方向。Git 提交、部署和 migration
+均不触发该流程。

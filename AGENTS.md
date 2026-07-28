@@ -1,6 +1,6 @@
 # WealthPlans 项目指南
 
-更新时间：2026-07-25
+更新时间：2026-07-27
 
 ## 1. 开始工作的强制步骤
 
@@ -35,7 +35,7 @@ GitHub 仓库：<https://github.com/399/WealthPlans>（公开）
 
 ## 3. 当前项目状态
 
-状态：技术基线与首个响应式页面已完成，本地全栈运行已验证。
+状态：Cloudflare 金融数据工具第一版已实现，preview 资源和远程数据已建立。
 
 截至 2026-07-25 已完成：
 
@@ -56,29 +56,49 @@ GitHub 仓库：<https://github.com/399/WealthPlans>（公开）
 - 完成响应式 WealthPlans 初始页面，演示数据已明确标记。
 - 类型检查、Biome、单元测试、生产构建和 Wrangler dry-run 已通过。
 
+截至 2026-07-27 新增：
+
+- 确认第一项产品能力为金融数据工具。
+- 首页改为 D1 数据目录、搜索、明细和同步入口。
+- 初始支持上证指数与安信稳健增值混合 A。
+- 同步支持日期范围、重叠预检、跳过或覆盖，并在完成后刷新页面。
+- 恢复 Cloudflare Worker + D1/R2 架构：D1 保存结构化数据，R2 归档同步批次。
+- 创建独立 preview D1 `wealthplans-preview` 与 R2 `wealthplans-preview-files`，并应用初始迁移。
+- preview Worker 已部署到 `https://wealthplans-preview.zkfop.workers.dev`，远程页面与读取 API 已验证。
+- 两个初始标的各 5 条真实日频数据已写入 local 与 preview D1。
+- 本地单日 skip 同步已验证：D1 跳过已有记录，R2 写入对应归档对象。
+- 新增 local ↔ preview 环境同步页与 Agent API，支持指纹比较、单向缺少项复制、显式冲突处理和计划过期拒绝。
+- Agent API 支持远程目录、JSON/CSV 区间读取、重叠预检和受保护同步。
+- 新增 `/agent-access` 接入说明页面与 `docs/runbooks/agent-data-access.md`。
+- UI 改为 Tailwind CSS v4 + shadcn/ui 的紧凑数据工具风格。
+- 类型、Biome、9 个单元测试、Worker/前端构建、Wrangler dry-run 和 HTTP/API 检查已通过。
+- 后续页面改动不再要求 Agent 执行浏览器测试，由用户自行查看；Agent 继续负责代码检查、构建和 HTTP/API 验证。
+- AKShare/FTShare 没有公开统一频率额度；已记录官方可确认边界、Schema 单次上限和本项目串行退避策略。
+
 尚未完成，且当前不应被视为缺陷：
 
-- 未创建远程 preview/production D1、R2 或 Worker。
-- 未配置域名、认证、CI/CD 和线上部署。
-- 未定义真实业务数据表、账户体系和完整产品范围。
+- 未创建 production D1、R2、Worker 或域名。
+- 未配置用户账户、Cloudflare Access 或 CI/CD。
+- preview 远程同步默认关闭，启用前必须配置 `SYNC_TOKEN`。
+- 未定义账户体系和金融数据工具之外的完整产品范围。
 - `.agents/skills/` 当前没有实际 skill。
 
 后续 Agent 完成一个明确里程碑时，必须更新本节：只记录经过验证的事实，并将被取代的信息移除或标记为历史。
 
 ## 4. 已确认技术架构
 
-除非形成新的架构决策记录，本项目采用：
+除非形成新的架构决策记录，当前产品采用：
 
 - TypeScript 严格模式。
 - React + Vite。
 - React Router。
-- Tailwind CSS。
-- Hono，API 前缀 `/api/v1`。
+- Tailwind CSS v4 + shadcn/ui。
+- Hono Cloudflare Worker，API 前缀 `/api/v1`。
 - Zod + Hono Validator。
 - Hono RPC 共享前后端 API 类型。
-- Cloudflare D1 + Drizzle ORM。
-- Cloudflare R2 存储用户文件或大对象。
-- React 静态资源和 Hono API 作为一个 Cloudflare Worker 部署。
+- Cloudflare D1 + Drizzle Schema。
+- Cloudflare R2 保存同步归档。
+- React 静态资源和 Hono API 作为一个 Worker 部署。
 - pnpm + Corepack。
 - Biome、Vitest、Playwright。
 
@@ -93,15 +113,14 @@ WealthPlans/
 ├── AGENTS.md                    # 本文件：项目入口与当前事实
 ├── package.json                 # 项目依赖与标准命令
 ├── pnpm-lock.yaml               # 可复现依赖锁
-├── wrangler.jsonc               # Worker 与 Cloudflare bindings
-├── vite.config.ts               # React + Cloudflare 本地运行
+├── wrangler.jsonc               # Worker 与环境 bindings
+├── vite.config.ts               # React + Cloudflare Vite 插件
 ├── .agents/
 │   └── skills/                 # WealthPlans 专属的可复用 Agent 技能
 ├── docs/
 │   ├── product/                # 已确认需求、术语、范围、验收标准
 │   ├── decisions/              # 架构决策记录
 │   └── runbooks/               # 本地开发、部署、备份和恢复步骤
-├── migrations/                 # D1 迁移
 ├── public/                     # 公开静态资源
 ├── src/
 │   ├── web/
@@ -111,11 +130,7 @@ WealthPlans/
 │   │   ├── lib/                # 前端基础工具与 API client
 │   │   ├── routes/             # 页面路由
 │   │   └── styles/
-│   ├── worker/
-│   │   ├── db/                 # Drizzle client 与 schema
-│   │   ├── middleware/
-│   │   ├── routes/             # Hono API 路由
-│   │   └── services/           # 跨路由业务服务
+│   ├── worker/                 # Hono Worker、D1、R2 与数据同步
 │   └── shared/
 │       ├── constants/
 │       ├── lib/
@@ -157,53 +172,55 @@ WealthPlans/
 
 - 在 `package.json#engines` 声明兼容的 Node 版本。
 - 在 `package.json#packageManager` 固定实际 pnpm 版本。
-- 将 Wrangler 和所有构建、测试 CLI 作为项目 `devDependency`。
+- 将 Vite、Wrangler 和所有构建、测试 CLI 作为项目 `devDependency`。
 - 提交 `pnpm-lock.yaml`。
 - 提供 `.env.example` 或 `.dev.vars.example`，只列变量名和无敏感示例。
 
 边界规则：
 
 - Node.js、mise/nvm、Corepack、Git 和 GitHub CLI 是设备级工具，只安装一次，不放入仓库。
-- React、Hono、Wrangler、Vite、Tailwind、测试工具及所有应用依赖必须作为项目依赖写入 `package.json`，否则其他设备无法复现构建。
-- `node_modules/`、本地 Worker 状态、编辑器缓存和真实密钥不得提交。
+- React、Hono、Vite、Tailwind、测试工具及所有应用依赖必须作为项目依赖写入 `package.json`，否则其他设备无法复现构建。
+- `node_modules/`、`.wrangler/state/`、编辑器缓存和真实密钥不得提交。
 - 项目内的 UI 组件属于 WealthPlans 产品代码；跨项目通用 Agent 技能放在用户级 skills 目录，不复制进本仓库。
 
 当前标准命令：
 
 ```sh
 pnpm install --frozen-lockfile  # 安装锁定的项目依赖
-pnpm cf:typegen                 # bindings 变化后重新生成 Worker 类型
+pnpm db:migrate:local           # 应用本地 D1 迁移
 pnpm dev                        # local React + Worker + D1 + R2
 pnpm check                      # 类型、规范、测试、构建、部署 dry-run
 ```
 
-Cloudflare 资源与环境切换详见 `docs/decisions/0001-cloudflare-environments.md` 和 `docs/runbooks/local-development.md`。
+环境架构详见 `docs/decisions/0001-cloudflare-environments.md` 和 `docs/runbooks/local-development.md`。
 
-## 8. Cloudflare 与系统资源确认
+## 8. Cloudflare 与外部数据源确认
 
-当前没有创建任何远程 Cloudflare 资源。本地开发使用 Wrangler/Cloudflare Vite 插件提供的本地 D1、R2 模拟，不连接线上资源。
+当前 local、preview 使用隔离的 D1/R2；production 资源尚未创建。ADR 0001 是当前基线，ADR 0002 为历史阶段。
 
-资源建立后，以以下位置为唯一事实来源：
+当前资源以以下位置为唯一事实来源：
 
 | 内容 | 确认位置 |
 |---|---|
-| Worker 名称、兼容日期、环境 | `wrangler.jsonc` |
-| D1/R2/KV binding 和资源 ID | `wrangler.jsonc` |
-| D1 数据结构 | `src/worker/db/schema.ts`、`migrations/` |
-| 本地非敏感变量名 | `.dev.vars.example` 或 `.env.example` |
-| 本地真实密钥 | 未纳入 Git 的 `.dev.vars` / `.env.local` |
-| 线上密钥 | Cloudflare Secrets，经授权后由本地 Wrangler 查询名称 |
-| 实际线上资源状态 | Cloudflare 控制台或 `pnpm exec wrangler ...` |
-| 部署和恢复步骤 | `docs/runbooks/` |
+| Worker、D1、R2 bindings | `wrangler.jsonc` |
+| D1 Schema 与迁移 | `src/worker/db/schema.ts`、`migrations/` |
+| 外部同步实现 | `src/worker/services/ftshare.ts` |
+| 本地状态 | `.wrangler/state/` |
+| 远程 secrets | Cloudflare Secrets |
+| 数据获取策略 | `README.md`、`AGENT_FUND_ETF_DATA_GUIDE.md` |
+| 备份和恢复步骤 | `docs/runbooks/local-development.md` |
 | 产品使用的第三方系统 | `docs/product/` 和对应 ADR |
 
 规则：
 
-- 不把示例资源名或推测的 ID 写成真实资源。
-- local、preview 和 production 使用相互隔离的 D1、R2 及密钥。
-- 日常 `pnpm dev` 只允许使用本地 binding；不得给 production binding 设置 `remote: true`。
-- 未经用户明确授权，不创建、修改或删除线上资源，不部署 production。
-- 任何资源创建完成后，立即把非敏感 binding 和环境信息写入 `wrangler.jsonc`，把操作方式写入 runbook。
+- 不把推测的数据源字段或单位写成已验证事实。
+- 页面和分析读取 D1；外部成功响应先归档 R2，再写入 D1。
+- 外部失败时保留已有数据，不写空值覆盖。
+- 同步只发送公开标的代码和日期区间，不发送个人财务数据。
+- 新增标的或数据源后立即更新 Schema 映射、产品文档和 runbook。
+- local、preview、production 资源必须相互隔离；不得在 local 日常开发中绑定 production。
+- local 可通过 `REMOTE_DB`/`REMOTE_FILES` remote bindings 显式访问 preview；只能由环境同步 API 在用户确认后使用。
+- 远程同步默认关闭；启用时必须使用 `SYNC_TOKEN`。
 - 不在日志、提交、文档或对话中输出真实 Token、Cookie、密码和财务敏感数据。
 
 ## 9. API、数据与 UI 约定
@@ -213,24 +230,28 @@ Cloudflare 资源与环境切换详见 `docs/decisions/0001-cloudflare-environme
 - 路径统一为 `/api/v1/*`。
 - 所有外部输入在边界使用 Zod 校验。
 - 使用稳定的机器可读错误码，不让前端依赖错误文本。
-- 前后端同域部署，除非出现明确需求，不增加 CORS 配置。
+- 前端静态资源与 API 同域部署，除非出现明确需求，不增加 CORS 配置。
 - Hono 路由导出类型供前端 RPC client 使用。
 
 ### 数据
 
-- schema 是数据模型事实来源，迁移是数据库变化事实来源。
-- 每个迁移都必须先在本地和 preview 验证。
-- 删除、覆盖、恢复生产数据属于破坏性操作，必须获得明确授权。
-- 时间按 UTC 存储，在展示层转换。
-- 金额策略必须通过 ADR 固定后再实施。
+- Drizzle Schema 是模型事实来源，migration 是数据库变化事实来源。
+- 每个 migration 必须先在 local，再在 preview 验证。
+- 删除、覆盖或恢复远程数据属于破坏性操作，必须获得明确授权。
+- 环境复制一次只能执行一个方向；缺少项只新增，冲突覆盖必须明确选择来源。
+- 环境复制提交必须携带最新 plan hash，状态变化后拒绝旧计划。
+- 数据日按 Asia/Shanghai 自然日保存，抓取时间按 UTC ISO 时间保存。
+- 价格、净值和金额按原始十进制字符串保存；计算策略另行通过 ADR 固定。
 
 ### UI
 
 - Mobile First，使用响应式布局，不判断具体设备型号。
+- 业务页面优先使用 `src/web/components/ui/` 中的 shadcn/ui 组件与 Tailwind utilities。
+- 保持紧凑、务实，避免装饰性大标题、渐变和无关动效。
 - 关键操作不能只依赖 hover。
 - 表格必须定义窄屏行为。
 - 组件优先保持可访问性和键盘操作。
-- 引入组件或状态库前先证明原生 React 和现有依赖不能清晰解决。
+- 新增 UI 原语优先通过 shadcn/ui 组件代码扩展，不引入第二套组件库。
 
 ## 10. 项目 Skills
 
@@ -268,8 +289,8 @@ skill 必须清楚声明适用与不适用场景。通用工作流应放在 `~/.
 完成任务时：
 
 1. 每次代码或配置改动后必须由 Agent 自行验证；至少运行与改动相关的类型检查、静态检查、测试和构建，默认使用 `pnpm check`。
-2. 页面、路由或运行时行为发生变化时，必须启动实际本地服务，确认目标页面和相关 API 可访问，并使用浏览器完成与改动相称的实际检查；构建成功不能替代运行时验证。
-3. 如果本次交付需要用户通过本地 URL 查看效果，完成验证后保持服务运行，并在交接中说明访问地址；若服务已停止，必须明确说明该地址当前不可访问。
+2. 页面、路由或运行时行为发生变化时，必须启动实际本地服务，并通过 HTTP/API 检查确认目标页面和相关 API 可访问；不要求 Agent 执行浏览器测试，页面视觉与交互由用户自行查看。
+3. 如果本次交付需要用户通过本地 URL 查看效果，完成服务和 HTTP 验证后保持服务运行，并在交接中说明访问地址；若服务已停止，必须明确说明该地址当前不可访问。
 4. 对照验收标准说明实际验证结果；不能把代码阅读、推测或留给用户测试当作完成证据。
 5. 更新本文件“当前项目状态”中的里程碑事实。
 6. 产品事实写入 `docs/product/`，架构取舍写入 `docs/decisions/`，操作步骤写入 `docs/runbooks/`。

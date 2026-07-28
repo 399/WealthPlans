@@ -2,6 +2,7 @@
 
 # Dependencies and build output
 node_modules/
+.pnpm-store/
 dist/
 coverage/
 .wrangler/
@@ -9,6 +10,7 @@ coverage/
 # Local databases and generated test output
 *.sqlite
 *.sqlite3
+.data/
 playwright-report/
 test-results/
 
@@ -23,4 +25,3 @@ test-results/
 # Logs and temporary files
 *.log
 *.tmp
-

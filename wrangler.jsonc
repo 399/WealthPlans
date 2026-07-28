@@ -2,7 +2,7 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "wealthplans",
   "main": "./src/worker/index.ts",
-  "compatibility_date": "2026-07-25",
+  "compatibility_date": "2026-07-27",
   "compatibility_flags": ["nodejs_compat"],
   "observability": {
     "enabled": true
@@ -14,10 +14,9 @@
     "run_worker_first": ["/api/*"]
   },
   "vars": {
-    "APP_ENV": "local"
+    "APP_ENV": "local",
+    "REMOTE_SYNC_ENABLED": "false"
   },
-  // These names and IDs are intentionally local-only. `vite` and `wrangler dev`
-  // use local D1/R2 state unless a binding explicitly opts into `remote: true`.
   "d1_databases": [
     {
       "binding": "DB",
@@ -31,5 +30,59 @@
       "binding": "FILES",
       "bucket_name": "wealthplans-local-files"
     }
-  ]
+  ],
+  "env": {
+    "local-sync": {
+      "vars": {
+        "APP_ENV": "local",
+        "REMOTE_SYNC_ENABLED": "false"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "wealthplans-local",
+          "database_id": "local",
+          "migrations_dir": "migrations"
+        },
+        {
+          "binding": "REMOTE_DB",
+          "database_name": "wealthplans-preview",
+          "database_id": "c14510e7-6022-47a0-ba52-70b7d7041739",
+          "remote": true
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "FILES",
+          "bucket_name": "wealthplans-local-files"
+        },
+        {
+          "binding": "REMOTE_FILES",
+          "bucket_name": "wealthplans-preview-files",
+          "remote": true
+        }
+      ]
+    },
+    "preview": {
+      "name": "wealthplans-preview",
+      "vars": {
+        "APP_ENV": "preview",
+        "REMOTE_SYNC_ENABLED": "false"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "wealthplans-preview",
+          "database_id": "c14510e7-6022-47a0-ba52-70b7d7041739",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "FILES",
+          "bucket_name": "wealthplans-preview-files"
+        }
+      ]
+    }
+  }
 }
