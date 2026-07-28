@@ -1,350 +1,557 @@
-import { hc } from "hono/client";
-import { useEffect, useState } from "react";
-import { formatCurrency } from "../../shared/lib/currency";
-import type { AppType } from "../../worker";
+import {
+  ArrowLeftRight,
+  Bot,
+  CheckCircle2,
+  Cloud,
+  Database,
+  RefreshCw,
+  Search,
+  Server,
+  X,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import type { DailyValue, InstrumentSummary } from "../../shared/schemas/financialData";
+import { Alert, AlertDescription, AlertTitle } from "../components/ui/alert";
+import { Badge } from "../components/ui/badge";
+import { Button, buttonVariants } from "../components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../components/ui/table";
+import { cn } from "../lib/utils";
 
-const api = hc<AppType>(window.location.origin);
-
-const goals = [
-  {
-    name: "安全垫",
-    detail: "覆盖 12 个月生活支出",
-    current: 186000,
-    target: 240000,
-    progress: 78,
-    tone: "clay",
-  },
-  {
-    name: "长期增长",
-    detail: "2035 年阶段目标",
-    current: 746000,
-    target: 1200000,
-    progress: 62,
-    tone: "sage",
-  },
-  {
-    name: "自由选择",
-    detail: "给未来留一份主动权",
-    current: 354400,
-    target: 800000,
-    progress: 44,
-    tone: "gold",
-  },
-] as const;
-
-const yearlyPath = [
-  { year: "现在", value: 42 },
-  { year: "2028", value: 50 },
-  { year: "2030", value: 62 },
-  { year: "2032", value: 73 },
-  { year: "2035", value: 88 },
-] as const;
-
-type ConnectionState = {
-  label: string;
-  environment: string;
-  connected: boolean;
+type SyncStep = "closed" | "setup" | "confirm" | "syncing" | "done";
+type ConflictMode = "skip" | "overwrite";
+type Health = {
+  environment: "local" | "preview" | "production";
+  storage: {
+    engine: string;
+    archive: string;
+    recordCount: number;
+    lastFetchedAt: string | null;
+  };
+  sync: { remoteEnabled: boolean; authRequired: boolean };
 };
 
+const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai" }).format(new Date());
+const fiveDaysAgo = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Shanghai",
+}).format(new Date(Date.now() - 6 * 86_400_000));
+
+function displayValue(value: string | null, digits = 4) {
+  if (!value) return "—";
+  return new Intl.NumberFormat("zh-CN", { maximumFractionDigits: digits }).format(Number(value));
+}
+
+function displayCompact(value: string | null) {
+  if (!value) return "—";
+  return new Intl.NumberFormat("zh-CN", {
+    notation: "compact",
+    maximumFractionDigits: 2,
+  }).format(Number(value));
+}
+
+async function readJson<T>(response: Response): Promise<T> {
+  const body = (await response.json()) as T & { error?: { message?: string } };
+  if (!response.ok) {
+    throw new Error(body.error?.message ?? `请求失败（HTTP ${response.status}）`);
+  }
+  return body;
+}
+
 export function HomePage() {
-  const [connection, setConnection] = useState<ConnectionState>({
-    label: "正在连接本地 Worker",
-    environment: "local",
-    connected: false,
-  });
+  const [query, setQuery] = useState("");
+  const [instruments, setInstruments] = useState<InstrumentSummary[]>([]);
+  const [catalog, setCatalog] = useState<InstrumentSummary[]>([]);
+  const [selectedSymbol, setSelectedSymbol] = useState("000001.XSHG");
+  const [values, setValues] = useState<DailyValue[]>([]);
+  const [health, setHealth] = useState<Health | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [syncStep, setSyncStep] = useState<SyncStep>("closed");
+  const [syncSymbols, setSyncSymbols] = useState<string[]>(["000001.XSHG", "001316.OF"]);
+  const [startDate, setStartDate] = useState(fiveDaysAgo);
+  const [endDate, setEndDate] = useState(today);
+  const [conflict, setConflict] = useState<ConflictMode>("skip");
+  const [overlaps, setOverlaps] = useState<Array<{ symbol: string; count: number }>>([]);
+  const [syncMessage, setSyncMessage] = useState("");
+  const [syncToken, setSyncToken] = useState("");
+
+  const loadInstruments = useCallback(async (search = "") => {
+    const response = await fetch(`/api/v1/instruments?q=${encodeURIComponent(search)}`);
+    const body = await readJson<{ data: InstrumentSummary[] }>(response);
+    setInstruments(body.data);
+    if (!search) setCatalog(body.data);
+    return body.data;
+  }, []);
+
+  const loadValues = useCallback(async (symbol: string) => {
+    const response = await fetch(`/api/v1/instruments/${encodeURIComponent(symbol)}/data`);
+    const body = await readJson<{ data: DailyValue[] }>(response);
+    setValues(body.data);
+  }, []);
+
+  const loadHealth = useCallback(async () => {
+    const response = await fetch("/api/v1/health");
+    setHealth(await readJson<Health>(response));
+  }, []);
 
   useEffect(() => {
     let active = true;
-
-    async function checkConnection() {
+    async function load() {
+      setLoading(true);
       try {
-        const response = await api.api.v1.health.$get({
-          query: {},
-        });
-        const result = await response.json();
-
-        if (active && "ok" in result && result.ok && "environment" in result) {
-          setConnection({
-            label: "本地环境已就绪",
-            environment: result.environment,
-            connected: true,
-          });
-        }
-      } catch {
-        if (active) {
-          setConnection({
-            label: "等待本地 Worker",
-            environment: "offline",
-            connected: false,
-          });
-        }
+        await Promise.all([loadHealth(), loadInstruments(), loadValues(selectedSymbol)]);
+        if (active) setError(null);
+      } catch (loadError) {
+        if (active) setError(loadError instanceof Error ? loadError.message : "数据读取失败");
+      } finally {
+        if (active) setLoading(false);
       }
     }
-
-    void checkConnection();
-
+    void load();
     return () => {
       active = false;
     };
-  }, []);
+  }, [loadHealth, loadInstruments, loadValues, selectedSymbol]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadInstruments(query).catch((searchError) =>
+        setError(searchError instanceof Error ? searchError.message : "搜索失败"),
+      );
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [loadInstruments, query]);
+
+  const selected = useMemo(
+    () => catalog.find((instrument) => instrument.symbol === selectedSymbol),
+    [catalog, selectedSymbol],
+  );
+  const totalRecords = catalog.reduce((sum, instrument) => sum + instrument.recordCount, 0);
+  const canSync = health?.sync.remoteEnabled === true;
+
+  function toggleSymbol(symbol: string) {
+    setSyncSymbols((current) =>
+      current.includes(symbol) ? current.filter((item) => item !== symbol) : [...current, symbol],
+    );
+  }
+
+  async function previewSync() {
+    setError(null);
+    if (syncSymbols.length === 0) {
+      setError("请至少选择一个同步标的");
+      return;
+    }
+    try {
+      const response = await fetch("/api/v1/sync/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbols: syncSymbols, startDate, endDate }),
+      });
+      const body = await readJson<{ overlaps: Array<{ symbol: string; count: number }> }>(response);
+      setOverlaps(body.overlaps);
+      setSyncStep("confirm");
+    } catch (previewError) {
+      setError(previewError instanceof Error ? previewError.message : "检查失败");
+    }
+  }
+
+  async function runSync() {
+    setSyncStep("syncing");
+    setError(null);
+    try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (health?.sync.authRequired && syncToken) {
+        headers.Authorization = `Bearer ${syncToken}`;
+      }
+      const response = await fetch("/api/v1/sync", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ symbols: syncSymbols, startDate, endDate, conflict }),
+      });
+      const body = await readJson<{
+        results: Array<{
+          symbol: string;
+          inserted: number;
+          updated: number;
+          skipped: number;
+        }>;
+      }>(response);
+      setSyncMessage(
+        body.results
+          .map(
+            (result) =>
+              `${result.symbol}：新增 ${result.inserted}，更新 ${result.updated}，跳过 ${result.skipped}`,
+          )
+          .join("；"),
+      );
+      await Promise.all([loadHealth(), loadInstruments(), loadValues(selectedSymbol)]);
+      if (query) await loadInstruments(query);
+      setSyncStep("done");
+    } catch (syncError) {
+      setError(syncError instanceof Error ? syncError.message : "同步失败");
+      setSyncStep("confirm");
+    }
+  }
+
+  function closeSync() {
+    setSyncStep("closed");
+    setSyncMessage("");
+    setOverlaps([]);
+  }
 
   return (
-    <div className="page-shell">
-      <header className="site-header">
-        <a className="brand" href="#top" aria-label="WealthPlans 首页">
-          <span className="brand-mark" aria-hidden="true">
-            W
-          </span>
-          <span>WealthPlans</span>
-        </a>
-
-        <nav className="primary-nav" aria-label="主要导航">
-          <a href="#overview">全景</a>
-          <a href="#plan">目标</a>
-          <a href="#next-step">行动</a>
-        </nav>
-
-        <a className="header-action" href="#plan">
-          进入规划
-          <span aria-hidden="true">↗</span>
-        </a>
+    <div className="min-h-screen bg-background">
+      <header className="border-b bg-card">
+        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6">
+          <Link className="flex items-center gap-2 font-semibold" to="/">
+            <span className="flex size-7 items-center justify-center rounded bg-primary text-xs text-primary-foreground">
+              WP
+            </span>
+            WealthPlans
+          </Link>
+          <nav className="flex items-center gap-2">
+            <Badge variant="outline" className="hidden gap-1.5 sm:flex">
+              <Cloud className="size-3" />
+              {health?.environment ?? "连接中"}
+            </Badge>
+            <Link
+              className={buttonVariants({ variant: "ghost", size: "sm" })}
+              to="/environment-sync"
+            >
+              <ArrowLeftRight className="size-4" />
+              <span className="hidden sm:inline">环境同步</span>
+            </Link>
+            <Link className={buttonVariants({ variant: "ghost", size: "sm" })} to="/agent-access">
+              <Bot className="size-4" />
+              Agent 接入
+            </Link>
+          </nav>
+        </div>
       </header>
 
-      <main id="top">
-        <section className="hero-section" aria-labelledby="hero-title">
-          <div className="hero-copy">
-            <p className="eyebrow">
-              <span aria-hidden="true" />
-              财富规划，不是行情追逐
+      <main className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6">
+        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">金融数据</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              查看 D1 中的数据范围，按需从公开数据源同步，原始同步批次归档到 R2。
             </p>
-            <h1 id="hero-title">
-              看清今天，
-              <br />
-              <em>也看见未来。</em>
-            </h1>
-            <p className="hero-description">
-              把散落的资产、目标与选择放进一张清晰的路线图。WealthPlans
-              帮你知道自己在哪里，也知道下一步为什么出发。
-            </p>
-
-            <div className="hero-actions">
-              <a className="primary-button" href="#plan">
-                创建第一份计划
-                <span aria-hidden="true">→</span>
-              </a>
-              <a className="text-link" href="#overview">
-                先看看示例
-              </a>
-            </div>
-
-            <div className="trust-note">
-              <span className="trust-icon" aria-hidden="true">
-                ✓
-              </span>
-              <p>
-                你的计划属于你
-                <small>当前页面仅使用本地演示数据</small>
-              </p>
-            </div>
           </div>
+          <Button disabled={!canSync} onClick={() => setSyncStep("setup")}>
+            <RefreshCw className="size-4" />
+            同步数据
+          </Button>
+        </div>
 
-          <div className="hero-visual" role="img" aria-label="财富计划示例概览">
-            <div className="visual-orbit orbit-one" aria-hidden="true" />
-            <div className="visual-orbit orbit-two" aria-hidden="true" />
+        {!canSync && health ? (
+          <Alert>
+            <AlertTitle>当前远程环境为只读</AlertTitle>
+            <AlertDescription>
+              数据可以远程查看。远程同步需先配置 SYNC_TOKEN 并显式启用，避免公开写接口被滥用。
+            </AlertDescription>
+          </Alert>
+        ) : null}
 
-            <article className="plan-card">
-              <div className="plan-card-header">
-                <div>
-                  <p>我的长期计划</p>
-                  <span>示例视图 · 2026—2035</span>
-                </div>
-                <span className="sample-badge">演示</span>
+        {error ? (
+          <Alert className="border-destructive/40 bg-destructive/5">
+            <AlertTitle>操作未完成</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : null}
+
+        <section className="grid gap-3 sm:grid-cols-3" aria-label="数据概览">
+          <Card className="gap-3 py-4 shadow-none">
+            <CardContent className="flex items-center justify-between px-4">
+              <div>
+                <p className="text-sm text-muted-foreground">已存标的</p>
+                <p className="mt-1 text-2xl font-semibold">{catalog.length}</p>
               </div>
-
-              <div className="net-worth">
-                <span>当前可规划资产</span>
-                <strong>{formatCurrency(1286400)}</strong>
-                <p>
-                  <span aria-hidden="true">↗</span>
-                  按当前节奏，2035 年目标可达成 86%
+              <Database className="size-5 text-muted-foreground" />
+            </CardContent>
+          </Card>
+          <Card className="gap-3 py-4 shadow-none">
+            <CardContent className="flex items-center justify-between px-4">
+              <div>
+                <p className="text-sm text-muted-foreground">日频记录</p>
+                <p className="mt-1 text-2xl font-semibold">
+                  {totalRecords.toLocaleString("zh-CN")}
                 </p>
               </div>
-
-              <div className="path-chart" role="img" aria-label="长期目标趋势示例">
-                {yearlyPath.map((item) => (
-                  <div className="path-column" key={item.year}>
-                    <div className="path-track">
-                      <span style={{ height: `${item.value}%` }} />
-                    </div>
-                    <small>{item.year}</small>
-                  </div>
-                ))}
-              </div>
-
-              <div className="plan-card-footer">
-                <div>
-                  <span>本月可投入</span>
-                  <strong>{formatCurrency(16800)}</strong>
-                </div>
-                <div>
-                  <span>目标缓冲</span>
-                  <strong>14.2%</strong>
-                </div>
-              </div>
-            </article>
-
-            <div className="floating-note note-top">
-              <span aria-hidden="true">◎</span>
-              <p>
-                安全垫
-                <strong>已覆盖 9.3 个月</strong>
+              <Server className="size-5 text-muted-foreground" />
+            </CardContent>
+          </Card>
+          <Card className="gap-3 py-4 shadow-none">
+            <CardContent className="px-4">
+              <p className="text-sm text-muted-foreground">存储</p>
+              <p className="mt-1 text-sm font-medium">
+                {health?.storage.engine ?? "D1"} · {health?.storage.archive ?? "R2"}
               </p>
-            </div>
-
-            <div className="floating-note note-bottom">
-              <span aria-hidden="true">↗</span>
-              <p>
-                下一步
-                <strong>完善年度现金流</strong>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {health?.storage.lastFetchedAt
+                  ? `最近抓取 ${new Date(health.storage.lastFetchedAt).toLocaleString("zh-CN")}`
+                  : "尚无抓取记录"}
               </p>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
         </section>
 
-        <section className="overview-section" id="overview" aria-labelledby="overview-title">
-          <div className="section-heading">
-            <p className="section-kicker">一眼看清</p>
-            <h2 id="overview-title">不是更多数字，而是更少疑问。</h2>
-            <p>用同一套口径回答三个问题：我拥有什么、我想去哪里、现在该做什么。</p>
-          </div>
-
-          <div className="overview-grid">
-            <article className="overview-card overview-card-featured">
-              <div className="card-number">01</div>
-              <div className="card-symbol" aria-hidden="true">
-                ◒
+        {syncStep !== "closed" ? (
+          <Card className="shadow-none">
+            <CardHeader className="flex-row items-start justify-between">
+              <div>
+                <CardTitle>{syncStep === "done" ? "同步完成" : "同步金融数据"}</CardTitle>
+                <CardDescription>先检查重叠记录，再明确选择跳过或覆盖。</CardDescription>
               </div>
-              <h3>资产全景</h3>
-              <p>把分散的资产与负债放到同一个视图，建立稳定、可比较的财富基线。</p>
-              <div className="mini-breakdown" role="img" aria-label="演示资产分布">
-                <span style={{ width: "48%" }} />
-                <span style={{ width: "30%" }} />
-                <span style={{ width: "22%" }} />
-              </div>
-            </article>
-
-            <article className="overview-card">
-              <div className="card-number">02</div>
-              <div className="card-symbol" aria-hidden="true">
-                ◌
-              </div>
-              <h3>目标路线</h3>
-              <p>把抽象的未来拆成时间、金额和缓冲，让每个目标都有可以行动的路径。</p>
-              <div className="milestone-row" aria-hidden="true">
-                <i />
-                <i />
-                <i />
-                <i />
-              </div>
-            </article>
-
-            <article className="overview-card">
-              <div className="card-number">03</div>
-              <div className="card-symbol" aria-hidden="true">
-                ↗
-              </div>
-              <h3>行动节奏</h3>
-              <p>优先处理真正影响长期结果的选择，不被每一天的市场噪声带走注意力。</p>
-              <div className="action-preview">
-                <span>本月优先级</span>
-                <strong>补齐现金流数据</strong>
-              </div>
-            </article>
-          </div>
-        </section>
-
-        <section className="goals-section" id="plan" aria-labelledby="goals-title">
-          <div className="goals-intro">
-            <p className="section-kicker">让目标有刻度</p>
-            <h2 id="goals-title">每一步，都知道离未来还有多远。</h2>
-            <p>
-              长期规划不是一次算完，而是一套会随着生活变化持续更新的系统。下面的数据仅用于展示页面结构。
-            </p>
-          </div>
-
-          <div className="goals-list">
-            {goals.map((goal) => (
-              <article className="goal-row" key={goal.name}>
-                <div className={`goal-dot goal-dot-${goal.tone}`} aria-hidden="true" />
-                <div className="goal-main">
-                  <div className="goal-title">
-                    <div>
-                      <h3>{goal.name}</h3>
-                      <p>{goal.detail}</p>
+              <Button aria-label="关闭同步面板" onClick={closeSync} size="icon" variant="ghost">
+                <X className="size-4" />
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              {syncStep === "setup" ? (
+                <>
+                  <fieldset className="space-y-2">
+                    <legend className="mb-2 text-sm font-medium">标的</legend>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {[
+                        ["000001.XSHG", "上证指数"],
+                        ["001316.OF", "安信稳健增值混合A"],
+                      ].map(([symbol, name]) => (
+                        <Label className="rounded-md border p-3" key={symbol}>
+                          <input
+                            checked={syncSymbols.includes(symbol)}
+                            onChange={() => toggleSymbol(symbol)}
+                            type="checkbox"
+                          />
+                          <span>
+                            <span className="block">{name}</span>
+                            <span className="font-mono text-xs font-normal text-muted-foreground">
+                              {symbol}
+                            </span>
+                          </span>
+                        </Label>
+                      ))}
                     </div>
-                    <strong>{goal.progress}%</strong>
+                  </fieldset>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Label className="grid gap-2">
+                      开始日期
+                      <Input
+                        max={endDate}
+                        onChange={(event) => setStartDate(event.target.value)}
+                        type="date"
+                        value={startDate}
+                      />
+                    </Label>
+                    <Label className="grid gap-2">
+                      结束日期
+                      <Input
+                        min={startDate}
+                        onChange={(event) => setEndDate(event.target.value)}
+                        type="date"
+                        value={endDate}
+                      />
+                    </Label>
                   </div>
-                  <div
-                    className="goal-progress"
-                    role="progressbar"
-                    aria-label={`${goal.name}进度`}
-                    aria-valuenow={goal.progress}
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                  >
-                    <span style={{ width: `${goal.progress}%` }} />
+                  <Button onClick={() => void previewSync()}>检查已有数据</Button>
+                </>
+              ) : null}
+
+              {syncStep === "confirm" || syncStep === "syncing" ? (
+                <>
+                  <div className="rounded-md border">
+                    {overlaps.map((item) => (
+                      <div
+                        className="flex items-center justify-between border-b px-3 py-2 text-sm last:border-0"
+                        key={item.symbol}
+                      >
+                        <span className="font-mono">{item.symbol}</span>
+                        <span>{item.count} 条重叠记录</span>
+                      </div>
+                    ))}
                   </div>
-                  <div className="goal-values">
-                    <span>当前 {formatCurrency(goal.current)}</span>
-                    <span>目标 {formatCurrency(goal.target)}</span>
+                  <fieldset className="space-y-2" disabled={syncStep === "syncing"}>
+                    <legend className="mb-2 text-sm font-medium">冲突处理</legend>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <Label className="rounded-md border p-3">
+                        <input
+                          checked={conflict === "skip"}
+                          name="conflict"
+                          onChange={() => setConflict("skip")}
+                          type="radio"
+                        />
+                        跳过已有记录
+                      </Label>
+                      <Label className="rounded-md border p-3">
+                        <input
+                          checked={conflict === "overwrite"}
+                          name="conflict"
+                          onChange={() => setConflict("overwrite")}
+                          type="radio"
+                        />
+                        覆盖已有记录
+                      </Label>
+                    </div>
+                  </fieldset>
+                  {health?.sync.authRequired ? (
+                    <Label className="grid max-w-md gap-2">
+                      远程同步令牌
+                      <Input
+                        autoComplete="off"
+                        onChange={(event) => setSyncToken(event.target.value)}
+                        placeholder="Bearer Token"
+                        type="password"
+                        value={syncToken}
+                      />
+                    </Label>
+                  ) : null}
+                  <div className="flex gap-2">
+                    <Button
+                      disabled={syncStep === "syncing"}
+                      onClick={() => setSyncStep("setup")}
+                      variant="outline"
+                    >
+                      返回
+                    </Button>
+                    <Button
+                      disabled={
+                        syncStep === "syncing" || (health?.sync.authRequired === true && !syncToken)
+                      }
+                      onClick={() => void runSync()}
+                    >
+                      {syncStep === "syncing" ? "同步中…" : "确认同步"}
+                    </Button>
+                  </div>
+                </>
+              ) : null}
+
+              {syncStep === "done" ? (
+                <div className="flex items-start gap-3 rounded-md border bg-muted/40 p-4">
+                  <CheckCircle2 className="mt-0.5 size-5 text-emerald-600" />
+                  <div>
+                    <p className="font-medium">数据与目录已刷新</p>
+                    <p className="mt-1 text-sm text-muted-foreground">{syncMessage}</p>
                   </div>
                 </div>
-              </article>
-            ))}
-          </div>
-        </section>
+              ) : null}
+            </CardContent>
+          </Card>
+        ) : null}
 
-        <section className="next-step-section" id="next-step" aria-labelledby="next-step-title">
-          <div className="next-step-copy">
-            <p className="section-kicker">从一个清楚的问题开始</p>
-            <h2 id="next-step-title">财富计划的第一步，不是预测未来。</h2>
-            <p>是先让今天的资产、现金流和目标使用同一套语言。功能开发将在产品范围确认后继续。</p>
-          </div>
-          <div className="readiness-card">
-            <div className="readiness-status">
-              <span className={connection.connected ? "status-dot is-ready" : "status-dot"} />
-              <div>
-                <strong>{connection.label}</strong>
-                <small>环境：{connection.environment}</small>
+        <section className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
+          <Card className="h-fit gap-4 py-4 shadow-none">
+            <CardHeader className="px-4">
+              <CardTitle className="text-base">数据目录</CardTitle>
+              <div className="relative pt-2">
+                <Search className="absolute left-3 top-4.5 size-4 text-muted-foreground" />
+                <Input
+                  className="pl-9"
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="搜索名称或代码"
+                  type="search"
+                  value={query}
+                />
               </div>
-            </div>
-            <div className="readiness-details">
-              <div>
-                <span>前端</span>
-                <strong>React + Vite</strong>
+            </CardHeader>
+            <CardContent className="space-y-1 px-2">
+              {instruments.map((instrument) => (
+                <Button
+                  className={cn(
+                    "h-auto w-full justify-start px-3 py-3 text-left",
+                    instrument.symbol === selectedSymbol && "bg-accent",
+                  )}
+                  key={instrument.symbol}
+                  onClick={() => setSelectedSymbol(instrument.symbol)}
+                  variant="ghost"
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-medium">{instrument.name}</span>
+                    <span className="mt-0.5 block font-mono text-xs text-muted-foreground">
+                      {instrument.symbol}
+                    </span>
+                  </span>
+                  <Badge variant="secondary">{instrument.recordCount}</Badge>
+                </Button>
+              ))}
+              {!loading && instruments.length === 0 ? (
+                <p className="px-3 py-8 text-center text-sm text-muted-foreground">没有匹配数据</p>
+              ) : null}
+            </CardContent>
+          </Card>
+
+          <Card className="min-w-0 shadow-none">
+            <CardHeader className="border-b">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <CardTitle>{selected?.name ?? "请选择标的"}</CardTitle>
+                  <CardDescription className="mt-1 font-mono">{selected?.symbol}</CardDescription>
+                </div>
+                {selected ? (
+                  <div className="flex gap-2">
+                    <Badge variant="outline">{selected.assetTypeLabel}</Badge>
+                    <Badge variant="secondary">
+                      {selected.startDate} — {selected.endDate}
+                    </Badge>
+                  </div>
+                ) : null}
               </div>
-              <div>
-                <span>服务端</span>
-                <strong>Hono + Workers</strong>
-              </div>
-              <div>
-                <span>本地数据</span>
-                <strong>D1 + R2</strong>
-              </div>
-            </div>
-          </div>
+            </CardHeader>
+            <CardContent className="px-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="pl-6">日期</TableHead>
+                    <TableHead>收盘 / 净值</TableHead>
+                    <TableHead>涨跌</TableHead>
+                    <TableHead>开盘</TableHead>
+                    <TableHead>最高</TableHead>
+                    <TableHead>最低</TableHead>
+                    <TableHead>成交量</TableHead>
+                    <TableHead className="pr-6">来源</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {values.map((value) => {
+                    const positive = Number(value.changePercent ?? 0) >= 0;
+                    return (
+                      <TableRow key={`${value.source}-${value.date}`}>
+                        <TableCell className="pl-6 font-mono">{value.date}</TableCell>
+                        <TableCell className="font-medium">
+                          {displayValue(value.unitNav ?? value.close)}
+                        </TableCell>
+                        <TableCell className={positive ? "text-rose-600" : "text-emerald-600"}>
+                          {value.changePercent
+                            ? `${positive ? "+" : ""}${displayValue(value.changePercent, 2)}%`
+                            : "—"}
+                        </TableCell>
+                        <TableCell>{displayValue(value.open)}</TableCell>
+                        <TableCell>{displayValue(value.high)}</TableCell>
+                        <TableCell>{displayValue(value.low)}</TableCell>
+                        <TableCell>{displayCompact(value.volume)}</TableCell>
+                        <TableCell className="pr-6">
+                          <Badge variant="outline">{value.source}</Badge>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
         </section>
       </main>
 
-      <footer className="site-footer">
-        <a className="brand brand-footer" href="#top">
-          <span className="brand-mark" aria-hidden="true">
-            W
-          </span>
-          <span>WealthPlans</span>
-        </a>
-        <p>让每个长期选择，都有清晰的依据。</p>
-        <span>初始技术预览 · 非财务建议</span>
+      <footer className="mt-8 border-t py-5 text-center text-xs text-muted-foreground">
+        数据仅用于个人研究，不构成投资建议
       </footer>
     </div>
   );

@@ -1,118 +1,122 @@
-# 本地开发与 Cloudflare 环境切换
+# Cloudflare 本地开发与 Preview 部署
 
-## 1. 新设备准备
-
-设备级工具只安装一次，不放入仓库：
-
-- Git。
-- Node.js 24 LTS；推荐使用 mise 或 nvm 管理。
-- Corepack。
-
-进入仓库后：
+## 1. 本地开发
 
 ```sh
 corepack enable pnpm
 pnpm install --frozen-lockfile
-pnpm cf:typegen
+pnpm db:migrate:local
 pnpm dev
 ```
 
-项目依赖安装在本仓库的 `node_modules/`，但不会提交到 Git。这样依赖版本由 `package.json` 和 `pnpm-lock.yaml` 复现，而不是依赖某台设备的全局包。
+访问 <http://localhost:5173>。Cloudflare Vite 插件在同一进程中运行 React、Hono Worker、本地 D1 和本地 R2；状态保存在 `.wrangler/state/`。
 
-## 2. 日常 local 开发
-
-```sh
-pnpm dev
-```
-
-默认行为：
-
-- React 使用 Vite 热更新。
-- Hono Worker 在本机 workerd 中运行。
-- `DB` 指向本机 D1。
-- `FILES` 指向本机 R2。
-- 数据持久化在 `.wrangler/state/`，不会访问 Cloudflare 线上资源。
+`pnpm dev` 会选择 `wrangler.jsonc#env.local-sync`：`DB`、`FILES` 仍使用本地模拟，
+`REMOTE_DB`、`REMOTE_FILES` 通过 remote bindings 连接 preview。remote binding 只在环境同步页面或对应
+API 被调用时产生远程读写；启动服务本身不会复制数据。使用该功能需要 Wrangler 已登录 Cloudflare。
 
 健康检查：
 
 ```sh
 curl http://localhost:5173/api/v1/health
-curl "http://localhost:5173/api/v1/health?deep=1"
+curl http://localhost:5173/api/v1/instruments
 ```
 
-普通健康检查不读取存储；`deep=1` 会执行一次本地 D1 查询和一次本地 R2 list，用于验证 bindings。
+## 2. 数据迁移
 
-本地 D1 迁移：
+Schema 由 `src/worker/db/schema.ts` 和 `migrations/` 共同描述。迁移顺序固定为：
 
 ```sh
 pnpm db:migrate:local
+pnpm db:migrate:preview
 ```
 
-所有本地 D1 命令必须显式携带 `--local`。如需全新本地状态，先停止开发服务器，再备份或移走 `.wrangler/state/`；不要删除来源不明的目录。
+production 尚未创建；不得把 preview 命令替换为无环境参数的远程写入。
 
-## 3. 创建 preview 资源
+## 3. Preview
 
-只有在用户明确要求创建 Cloudflare 资源时执行：
+preview 资源在 `wrangler.jsonc#env.preview` 中绑定：
+
+- D1：`wealthplans-preview`
+- R2：`wealthplans-preview-files`
+- Worker：`wealthplans-preview`
+
+部署：
 
 ```sh
-pnpm exec wrangler d1 create wealthplans-preview
-pnpm exec wrangler r2 bucket create wealthplans-preview-files
+pnpm deploy:preview
 ```
 
-把返回的真实 D1 ID 和 bucket 名写入 `wrangler.jsonc` 的 `env.preview`，不得使用示例 ID。preview Worker 名称为 `wealthplans-preview`。
+Cloudflare Vite 插件在构建阶段读取 `CLOUDFLARE_ENV=preview`。不要对已生成的 `dist/wealthplans/wrangler.json` 手工修改。
 
-应用迁移：
+## 4. 远程同步安全
+
+preview 默认 `REMOTE_SYNC_ENABLED=false`，只允许远程查看。启用同步时：
+
+1. 执行 `pnpm exec wrangler secret put SYNC_TOKEN --env preview`。
+2. 将 `wrangler.jsonc#env.preview.vars.REMOTE_SYNC_ENABLED` 改为 `true`。
+3. 重新运行 `pnpm deploy:preview`。
+4. Web 或 Agent 请求使用 `Authorization: Bearer <SYNC_TOKEN>`。
+
+不得把 Token 写入仓库、日志或公开页面。
+
+上述 Token 用于“远程 Worker 自己抓取外部数据”，与本地/preview 环境复制不同。环境复制从本地 Worker
+通过 remote bindings 完成，不开放公网复制写 API。
+
+## 5. Local 与 preview 环境复制
+
+网页入口：<http://localhost:5173/environment-sync>
+
+检查：
 
 ```sh
-pnpm exec wrangler d1 migrations apply wealthplans-preview --env preview --remote
+curl http://localhost:5173/api/v1/environment-sync/compare
 ```
 
-构建并部署：
+确认提交示例：
 
 ```sh
-CLOUDFLARE_ENV=preview pnpm build
-CLOUDFLARE_ENV=preview pnpm exec wrangler deploy
+curl -X POST http://localhost:5173/api/v1/environment-sync/transfer \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": "pull_missing",
+    "planHash": "<compare 返回的 64 位哈希>",
+    "confirmed": true
+  }'
 ```
 
-只有需要直接调试真实 preview bindings 时，才为 preview binding 设置 `remote: true` 并使用：
+动作：
+
+| action | 行为 |
+|---|---|
+| `push_missing` | 本地独有记录新增到 preview |
+| `pull_missing` | preview 独有记录新增到本地 |
+| `resolve_local` | 内容冲突以本地为准，覆盖 preview |
+| `resolve_remote` | 内容冲突以 preview 为准，覆盖本地 |
+
+规则：
+
+- 主键为来源、标的、数据类型、日期。
+- 指纹包含全部金融数值字段，不包含 `fetchedAt`。
+- 单次最多 500 条；总清单第一版最多 5000 条。
+- 一次只执行一个方向，不提供隐式双向合并。
+- 提交时重新计算 plan hash；不一致返回 `409 SYNC_PLAN_STALE`。
+- 目标环境必须已有标的定义，否则拒绝写入。
+- 成功传输在目标 R2 留存审计归档。
+
+Git commit、push、migration 和 deploy 不会调用此 API。
+
+## 6. 验证
 
 ```sh
-CLOUDFLARE_ENV=preview pnpm dev
+pnpm check
 ```
 
-使用结束后应恢复默认 local 开发，避免每次刷新都产生远程访问。
+页面或 API 变化后启动 `pnpm dev`，通过 HTTP 检查首页和 API 可访问。页面视觉与交互由用户自行查看，不要求 Agent 执行浏览器测试。
 
-## 4. 创建 production 资源
+## 7. 禁止事项
 
-只有在用户明确要求上线时执行：
-
-```sh
-pnpm exec wrangler d1 create wealthplans-production
-pnpm exec wrangler r2 bucket create wealthplans-production-files
-```
-
-将真实资源信息写入 `wrangler.jsonc` 的 `env.production`。production 不得复用 preview 资源。
-
-上线顺序：
-
-1. 确认 local 检查通过。
-2. 确认相同提交已在 preview 验证。
-3. 确认 production D1 Time Travel 状态。
-4. 应用 production 迁移。
-5. 使用 production 环境构建。
-6. 部署该构建产物。
-7. 执行只读健康检查与关键流程冒烟测试。
-
-```sh
-pnpm exec wrangler d1 migrations apply wealthplans-production --env production --remote
-CLOUDFLARE_ENV=production pnpm build
-CLOUDFLARE_ENV=production pnpm exec wrangler deploy
-```
-
-## 5. 禁止事项
-
-- 不把真实 `.env`、`.dev.vars`、Token 或财务数据提交到 Git。
-- 不让 local 和 preview/production 共用 D1 或 R2。
-- 不把 production binding 配置为日常远程开发资源。
-- 不在未确认目标环境时执行 D1 写入、迁移或 R2 删除。
-- 不从 production 向本地导入未经脱敏的用户数据。
+- 不提交 `.wrangler/state/`、Token、Cookie 或个人财务数据。
+- 不把外部失败响应作为空行情写入。
+- 不混淆基金单位净值、复权净值和指数/ETF 市场价。
+- local remote bindings 只能指向 preview，不得绑定 production。
