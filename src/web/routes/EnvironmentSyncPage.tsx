@@ -169,9 +169,9 @@ export function EnvironmentSyncPage() {
             </span>
             WealthPlans
           </Link>
-          <Link className={buttonVariants({ variant: "ghost", size: "sm" })} to="/">
+          <Link className={buttonVariants({ variant: "ghost", size: "sm" })} to="/data-center">
             <ArrowLeft className="size-4" />
-            返回数据
+            返回数据中心
           </Link>
         </div>
       </header>

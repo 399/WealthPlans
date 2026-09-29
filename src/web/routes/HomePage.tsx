@@ -67,7 +67,7 @@ async function readJson<T>(response: Response): Promise<T> {
   return body;
 }
 
-export function HomePage() {
+export function DataCenterPage() {
   const [query, setQuery] = useState("");
   const [instruments, setInstruments] = useState<InstrumentSummary[]>([]);
   const [catalog, setCatalog] = useState<InstrumentSummary[]>([]);
@@ -220,6 +220,9 @@ export function HomePage() {
             WealthPlans
           </Link>
           <nav className="flex items-center gap-2">
+            <Link className={buttonVariants({ variant: "ghost", size: "sm" })} to="/">
+              总览
+            </Link>
             <Badge variant="outline" className="hidden gap-1.5 sm:flex">
               <Cloud className="size-3" />
               {health?.environment ?? "连接中"}
@@ -242,7 +245,7 @@ export function HomePage() {
       <main className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6">
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">金融数据</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">数据中心</h1>
             <p className="mt-1 text-sm text-muted-foreground">
               查看 D1 中的数据范围，按需从公开数据源同步，原始同步批次归档到 R2。
             </p>

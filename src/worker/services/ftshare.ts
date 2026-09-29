@@ -203,7 +203,7 @@ export async function fetchFtshareValues(
       let page = 1;
       let hasMore = true;
       while (hasMore) {
-        const response = await callTool(sessionId, "ft_get_fund_net_value", {
+        const response = await callTool(sessionId, "ft_v1_fund_fund_net_value", {
           fund_code: "001316",
           start_date: compactDate(startDate),
           end_date: compactDate(endDate),
@@ -235,7 +235,7 @@ export async function fetchFtshareValues(
 
     const rows: Array<Record<string, string | number>> = [];
     for (const range of splitDateRange(startDate, endDate)) {
-      const response = await callTool(sessionId, "ft_stock_candlesticks", {
+      const response = await callTool(sessionId, "ft_v1_index_candlesticks", {
         symbol,
         interval_unit: "day",
         interval_value: 1,
